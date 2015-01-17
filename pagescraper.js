@@ -1,33 +1,67 @@
 var fs = require("fs"),
-    http = require("http"),
-    request = require("request");
+    path = require("path"),
+    request = require("request"),
+    cheerio = require("cheerio");
 
-if (process.argv.length < 4) {
-    console.log('Invalid Arguments - Exiting scraper...');
-    process.exit(1);
-}
+var argv = require('optimist')
+    .usage('Usage: $0 -j [js template] -u [url file]')
+    .demand(['j', 'u'])
+    .argv;
 
-var addonLocation = './addons/' + process.argv[2] + '/';
-var dataScraper = require(addonLocation + 'process.js');
+var external = require(argv.j);
+var options = {};
 
 var helpers = {
-    getText: function ( $, currentResource ) {
+    processType: function ($, currentResource, downloads) {
+        switch (currentResource['type']) {
+            case 'options':
+                this.getOptions(currentResource);
+                break;
+            case 'text':
+                this.getText($, currentResource);
+                break;
+            case 'image-download':
+            case 'video-download':
+            case 'swf-download':
+                this.getSource($, currentResource, downloads);
+                break;
+            case 'attribute':
+                this.getAttribute($, currentResource);
+                break;
+            default :
+                console.log('Unrecognized type: ' + currentResource['type']);
+                break;
+        }
+    },
+    getOptions: function (currentResource) {
+        options = currentResource['options'];
+    },
+    getText: function ($, currentResource) {
         currentResource['value'] = $(currentResource['selector']).text();
     },
-    getSource: function( $, currentResource, downloads ) {
-        currentResource['url'] = $(currentResource['selector']).attr('src');
-        currentResource['value'] = currentResource['url'];
+    getSource: function ($, currentResource, downloads) {
+        currentResource['attribute'] = 'src';
+        this.getAttribute($, currentResource);
 
-        if ( typeof currentResource['url'] !== 'undefined' && typeof downloads !== 'undefined' ) {
-            currentResource['value'] = currentResource['url'].substring(currentResource['url'].lastIndexOf('/') + 1);
+        currentResource['value'] = currentResource['src'];
+        if (typeof currentResource['src'] !== 'undefined' && typeof downloads !== 'undefined') {
+            currentResource['filename'] = options['resourceFilename']($, currentResource['src'], currentResource);
             downloads.push({
-                'url': currentResource['url'],
-                'filename': currentResource['value']
+                'url': currentResource['src'],
+                'filename': currentResource['filename']
             });
         }
     },
-    saveJSON: function (filename, data, dir) {
-        if (typeof dir !== 'undefined') {
+    getAttribute: function ($, currentResource) {
+        currentResource['src'] = $(currentResource['selector']).attr('src');
+    },
+    saveJSON: function (filename, data) {
+        var fileLocation = filename;
+
+        if (typeof options['dataDir'] !== 'undefined') {
+            var dir = options['dataDir'];
+            fileLocation = path.join(dir, filename);
+
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, 0766, function (err) {
                     if (err) {
@@ -40,14 +74,14 @@ var helpers = {
 
         var jsonData = JSON.stringify(data);
 
-        fs.writeFile(dir + '/' + filename, jsonData, function (err) {
+        fs.writeFile(fileLocation, jsonData, function (err) {
             if (err) {
-                console.log('Could not save JSON: ' + filename);
+                console.log('Could not save JSON to: ' + fileLocation);
                 process.exit(4);
             }
         });
     },
-    downloadFiles: function (files, dir, callback) {
+    downloadFiles: function (files, callback) {
 
         if (files.length === 0) {
             return;
@@ -55,7 +89,13 @@ var helpers = {
 
         var file = files.shift();
 
-        if (typeof dir !== 'undefined') {
+        var filename = file['filename'];
+        var fileLocation = filename;
+
+        if (typeof options['resourceDir'] !== 'undefined') {
+            var dir = options['resourceDir'];
+            fileLocation = path.join(dir, filename);
+
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, 0766, function (err) {
                     if (err) {
@@ -66,15 +106,13 @@ var helpers = {
             }
         }
 
-        var filename = dir + '/' + file['filename'];
-
         try {
-            if (!fs.existsSync(filename)) {
+            if (!fs.existsSync(fileLocation)) {
                 request.get({url: file['url'], encoding: 'binary'}, function (err, response, body) {
                     if (err) {
                         callback(err, file['url']);
                     } else {
-                        fs.writeFile(filename, body, 'binary', function (err) {
+                        fs.writeFile(fileLocation, body, 'binary', function (err) {
                             if (err) {
                                 callback(err, file['url']);
                             }
@@ -82,7 +120,7 @@ var helpers = {
                     }
                 });
             } else {
-                console.log('File already exists.');
+                console.log('File already exists: ' + fileLocation);
             }
         } catch (err) {
             callback(err, file['url']);
@@ -91,11 +129,44 @@ var helpers = {
                 helpers.downloadFiles(files, dir, callback);
             }
         }
-
     }
 }
 
-fs.readFile(addonLocation + process.argv[3], 'utf8', function (err, data) {
+function loadPage(url, data) {
+    var $ = cheerio.load(data);
+    var pageTemplate = external.template();
+    var downloads = [];
+
+    walkTemplate($, pageTemplate, downloads);
+
+    helpers.downloadFiles(downloads, function (error, filename) {
+        if (error) {
+            console.log('Error downloading file to: ' + filename);
+        }
+    });
+
+    var saveFilename = options.dataFilename($,url,pageTemplate);
+
+    helpers.saveJSON(saveFilename, pageTemplate, 'jsonData');
+}
+
+function walkTemplate($, currentResource, downloads) {
+    Object.keys(currentResource).forEach(function (key) {
+        if (currentResource.hasOwnProperty(key)) {
+            if (currentResource[key] !== null && typeof currentResource[key] === 'object') {
+                walkTemplate($, currentResource[key], downloads);
+            } else if (key === 'type') {
+                helpers.processType($, currentResource, downloads);
+            }
+        }
+    });
+}
+
+if (typeof external['options'] !== 'undefined') {
+    options = external['options'];
+}
+
+fs.readFile(argv.u, 'utf8', function (err, data) {
     if (err) {
         console.log(err);
         process.exit(2);
@@ -103,23 +174,13 @@ fs.readFile(addonLocation + process.argv[3], 'utf8', function (err, data) {
 
     var urlList = data.split("\n");
 
-    urlList.forEach(function (url, index, array) {
-        downloadUrl(url, dataScraper.process_page);
+    urlList.forEach(function (url) {
+        request.get(url, function (err, response, body) {
+            if (err) {
+                console.log("Error on url: " + url);
+            } else {
+                loadPage(url, body);
+            }
+        });
     });
 });
-
-// Utility function that downloads a URL and invokes
-// callback with the data.
-function downloadUrl(url, callback) {
-    http.get(url, function (res) {
-        var data = "";
-        res.on("data", function (chunk) {
-            data += chunk;
-        });
-        res.on("end", function () {
-            callback(url, data, helpers);
-        });
-    }).on("error", function () {
-        console.log("Error on url: " + url);
-    });
-}

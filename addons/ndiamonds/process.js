@@ -54,6 +54,15 @@ function getData(url, $, helpers) {
     currentResource = pageData['resources']['videos']['html_5_2']['webm'];
     helpers.getSource( $, currentResource );
 
+    Object.keys(pageData).forEach(function (key) {
+        if ( pageData.hasOwnProperty(key) ) {
+            var value = pageData[key];
+            console.log('property' + key);
+        } else {
+            console.log('object' + key);
+        }
+    });
+
     helpers.downloadFiles(downloads, 'downloads', function (error, filename) {
         if (error) {
             console.log('Error downloading file to: ' + filename);

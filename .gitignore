@@ -1,3 +1,6 @@
 .idea/
 .thumbs_db
 node_modules/
+jsonData/
+downloads/
+filedata/
