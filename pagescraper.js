@@ -9,7 +9,20 @@ var argv = require('optimist')
     .argv;
 
 var external = require(argv.j);
-var options = {};
+var options = {
+    resourceDir: function (filename, pageTemplate) {
+        return './downloads';
+    },
+    dataDir: function (filename, pageTemplate) {
+        return './filedata';
+    },
+    dataFilename: function ($, url, pageTemplate) {
+        return pageTemplate['title']['value'].toLowerCase().replace(/[|&;$%@"<>()+,]/g, "").replace(/\s+/g, '-') + '.json';
+    },
+    resourceFilename: function ($, url, currentResource) {
+        return url.substring(url.lastIndexOf('/') + 1);
+    }
+};
 
 var helpers = {
     processType: function ($, currentResource, downloads) {
@@ -58,18 +71,16 @@ var helpers = {
     saveJSON: function (filename, data) {
         var fileLocation = filename;
 
-        if (typeof options['dataDir'] !== 'undefined') {
-            var dir = options['dataDir'];
-            fileLocation = path.join(dir, filename);
+        var dir = options['dataDir'](filename, external.template());
+        fileLocation = path.join(dir, filename);
 
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, 0766, function (err) {
-                    if (err) {
-                        console.log('Error creating dir: ' + dir);
-                        process.exit(3);
-                    }
-                });
-            }
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, 0766, function (err) {
+                if (err) {
+                    console.log('Error creating dir: ' + dir);
+                    process.exit(3);
+                }
+            });
         }
 
         var jsonData = JSON.stringify(data);
@@ -92,18 +103,16 @@ var helpers = {
         var filename = file['filename'];
         var fileLocation = filename;
 
-        if (typeof options['resourceDir'] !== 'undefined') {
-            var dir = options['resourceDir'];
-            fileLocation = path.join(dir, filename);
+        var dir = options['resourceDir'](filename, external.template());
+        fileLocation = path.join(dir, filename);
 
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, 0766, function (err) {
-                    if (err) {
-                        console.log('Error creating dir: ' + dir);
-                        process.exit(3);
-                    }
-                });
-            }
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, 0766, function (err) {
+                if (err) {
+                    console.log('Error creating dir: ' + dir);
+                    process.exit(3);
+                }
+            });
         }
 
         try {
@@ -129,6 +138,22 @@ var helpers = {
                 helpers.downloadFiles(files, dir, callback);
             }
         }
+    },
+    mergeObjects: function (obj1, obj2) {
+        for (var p in obj2) {
+            try {
+                // Property in destination object set; update its value.
+                if (obj2[p].constructor == Object) {
+                    obj1[p] = this.mergeObjects(obj1[p], obj2[p]);
+                } else {
+                    obj1[p] = obj2[p];
+                }
+            } catch (e) {
+                // Property in destination object not set; create it and set its value.
+                obj1[p] = obj2[p];
+            }
+        }
+        return obj1;
     }
 }
 
@@ -145,7 +170,7 @@ function loadPage(url, data) {
         }
     });
 
-    var saveFilename = options.dataFilename($,url,pageTemplate);
+    var saveFilename = options.dataFilename($, url, pageTemplate);
 
     helpers.saveJSON(saveFilename, pageTemplate, 'jsonData');
 }
@@ -163,7 +188,7 @@ function walkTemplate($, currentResource, downloads) {
 }
 
 if (typeof external['options'] !== 'undefined') {
-    options = external['options'];
+    options = helpers.mergeObjects(options, external.options);
 }
 
 fs.readFile(argv.u, 'utf8', function (err, data) {

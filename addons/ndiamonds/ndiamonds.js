@@ -1,11 +1,15 @@
 module.exports = {
     options: {
-        resourceDir: './downloads',
-        dataDir: './filedata',
-        dataFilename: function($, url, pageTemplate) {
+        resourceDir: function (filename, pageTemplate) {
+            return './downloads';
+        },
+        dataDir: function (filename, pageTemplate) {
+            return './filedata';
+        },
+        dataFilename: function ($, url, pageTemplate) {
             return pageTemplate['title']['value'].toLowerCase().replace(/[|&;$%@"<>()+,]/g, "").replace(/\s+/g, '-') + '.json';
         },
-        resourceFilename: function($, url, currentResource) {
+        resourceFilename: function ($, url, currentResource) {
             return url.substring(url.lastIndexOf('/') + 1);
         }
     },
