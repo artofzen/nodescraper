@@ -17,10 +17,13 @@ var options = {
         return './filedata';
     },
     dataFilename: function ($, url, pageTemplate) {
-        return pageTemplate['title']['value'].toLowerCase().replace(/[|&;$%@"<>()+,]/g, "").replace(/\s+/g, '-') + '.json';
+        return encodeURIComponent(pageTemplate['title']['value'].toLowerCase().replace(/\s+/g, '-') + '.json');
     },
     resourceFilename: function ($, url, currentResource) {
         return url.substring(url.lastIndexOf('/') + 1);
+    },
+    beforeDataSave: function (url, pageTemplate) {
+        pageTemplate['url'] = url;
     }
 };
 
@@ -68,7 +71,7 @@ var helpers = {
     getAttribute: function ($, currentResource) {
         currentResource['src'] = $(currentResource['selector']).attr('src');
     },
-    saveJSON: function (filename, data) {
+    saveJSON: function (url, filename, data) {
         var fileLocation = filename;
 
         var dir = options['dataDir'](filename, external.template());
@@ -82,6 +85,8 @@ var helpers = {
                 }
             });
         }
+
+        options.beforeDataSave( url, data );
 
         var jsonData = JSON.stringify(data);
 
@@ -172,7 +177,7 @@ function loadPage(url, data) {
 
     var saveFilename = options.dataFilename($, url, pageTemplate);
 
-    helpers.saveJSON(saveFilename, pageTemplate, 'jsonData');
+    helpers.saveJSON(url, saveFilename, pageTemplate, 'jsonData');
 }
 
 function walkTemplate($, currentResource, downloads) {
@@ -200,7 +205,8 @@ fs.readFile(argv.u, 'utf8', function (err, data) {
     var urlList = data.split("\n");
 
     urlList.forEach(function (url) {
-        request.get(url, function (err, response, body) {
+        url = url.trim();
+        request.get({url: url, encoding: 'utf-8'}, function (err, response, body) {
             if (err) {
                 console.log("Error on url: " + url);
             } else {

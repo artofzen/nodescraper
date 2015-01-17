@@ -7,10 +7,13 @@ module.exports = {
             return './filedata';
         },
         dataFilename: function ($, url, pageTemplate) {
-            return pageTemplate['title']['value'].toLowerCase().replace(/[|&;$%@"<>()+,]/g, "").replace(/\s+/g, '-') + '.json';
+            return encodeURIComponent(pageTemplate['title']['value'].toLowerCase().replace(/\s+/g, '-') + '.json');
         },
         resourceFilename: function ($, url, currentResource) {
             return url.substring(url.lastIndexOf('/') + 1);
+        },
+        beforeDataSave: function (url, pageTemplate) {
+            pageTemplate['page_url'] = url;
         }
     },
     template: function () {
