@@ -19,7 +19,7 @@ module.exports = {
             return ['type', 'custom', 'selector', 'attribute'];
         }
     },
-    template: function () {
+    template: function ($, url) {
         return {
             'title': {
                 'type': 'text',

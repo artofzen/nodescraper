@@ -86,10 +86,10 @@ var helpers = {
             });
         });
     },
-    saveJSON: function (url, filename, data) {
+    saveJSON: function (url, filename, pageTemplate) {
         var fileLocation = filename;
 
-        var dir = options['dataDir'](filename, external.template());
+        var dir = options['dataDir'](filename, pageTemplate);
         fileLocation = path.join(dir, filename);
 
         if (!fs.existsSync(dir)) {
@@ -101,9 +101,9 @@ var helpers = {
             });
         }
 
-        options.beforeDataSave(url, data);
+        options.beforeDataSave(url, pageTemplate);
 
-        var jsonData = JSON.stringify(data);
+        var jsonData = JSON.stringify(pageTemplate);
 
         fs.writeFile(fileLocation, jsonData, function (err) {
             if (err) {
@@ -112,7 +112,7 @@ var helpers = {
             }
         });
     },
-    downloadFiles: function (files, callback) {
+    downloadFiles: function (files, callback, pageTemplate) {
 
         if (files.length === 0) {
             return;
@@ -123,7 +123,7 @@ var helpers = {
         var filename = file['filename'];
         var fileLocation = filename;
 
-        var dir = options['resourceDir'](filename, external.template());
+        var dir = options['resourceDir'](filename, pageTemplate);
         fileLocation = path.join(dir, filename);
 
         if (!fs.existsSync(dir)) {
@@ -163,7 +163,7 @@ var helpers = {
 
 function loadPage(url, data) {
     var $ = cheerio.load(data);
-    var pageTemplate = external.template();
+    var pageTemplate = external.template($, url);
     var downloads = [];
 
     walkTemplate($, pageTemplate, downloads);
@@ -173,14 +173,14 @@ function loadPage(url, data) {
             if (error) {
                 console.log('Error downloading file to: ' + filename);
             }
-        });
+        }, pageTemplate);
     }
 
     cleanTemplate($, pageTemplate);
 
     var saveFilename = options.dataFilename($, url, pageTemplate);
 
-    helpers.saveJSON(url, saveFilename, pageTemplate, 'jsonData');
+    helpers.saveJSON(url, saveFilename, pageTemplate);
 }
 
 function walkTemplate($, currentResource, downloads) {
