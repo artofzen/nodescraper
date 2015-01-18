@@ -1,14 +1,16 @@
 var fs = require("fs"),
     path = require("path"),
     request = require("request"),
+    merge = require("merge"),
     cheerio = require("cheerio");
 
 var argv = require('optimist')
-    .usage('Usage: $0 -j [js template] -u [url file]')
+    .usage('Usage: $0 -j [js template] -u [url file] -d [on|off]')
     .demand(['j', 'u'])
     .argv;
 
 var external = require(argv.j);
+
 var options = {
     resourceDir: function (filename, pageTemplate) {
         return './downloads';
@@ -24,15 +26,15 @@ var options = {
     },
     beforeDataSave: function (url, pageTemplate) {
         pageTemplate['url'] = url;
+    },
+    deleteMetadata: function () {
+        return ['type', 'custom', 'selector', 'attribute'];
     }
 };
 
 var helpers = {
     processType: function ($, currentResource, downloads) {
         switch (currentResource['type']) {
-            case 'options':
-                this.getOptions(currentResource);
-                break;
             case 'text':
                 this.getText($, currentResource);
                 break;
@@ -44,13 +46,15 @@ var helpers = {
             case 'attribute':
                 this.getAttribute($, currentResource);
                 break;
+            case 'custom':
+                currentResource['custom']($, currentResource, downloads);
+                break;
+            case 'select-options':
+                this.getSelectOptions($, currentResource);
+                break;
             default :
                 console.log('Unrecognized type: ' + currentResource['type']);
-                break;
         }
-    },
-    getOptions: function (currentResource) {
-        options = currentResource['options'];
     },
     getText: function ($, currentResource) {
         currentResource['value'] = $(currentResource['selector']).text();
@@ -59,7 +63,6 @@ var helpers = {
         currentResource['attribute'] = 'src';
         this.getAttribute($, currentResource);
 
-        currentResource['value'] = currentResource['src'];
         if (typeof currentResource['src'] !== 'undefined' && typeof downloads !== 'undefined') {
             currentResource['filename'] = options['resourceFilename']($, currentResource['src'], currentResource);
             downloads.push({
@@ -69,7 +72,19 @@ var helpers = {
         }
     },
     getAttribute: function ($, currentResource) {
-        currentResource['src'] = $(currentResource['selector']).attr('src');
+        currentResource['value'] = $(currentResource['selector']).attr(currentResource['attribute']);
+    },
+    getSelectOptions: function ($, currentResource) {
+        var selectOptions = $(currentResource['selector'] + ' option');
+        currentResource['options'] = [];
+        selectOptions.each(function (i, elem) {
+            var text = $(elem).text();
+            var value = $(elem).attr('value');
+            currentResource['options'].push({
+                'text': text,
+                'value': value
+            });
+        });
     },
     saveJSON: function (url, filename, data) {
         var fileLocation = filename;
@@ -86,7 +101,7 @@ var helpers = {
             });
         }
 
-        options.beforeDataSave( url, data );
+        options.beforeDataSave(url, data);
 
         var jsonData = JSON.stringify(data);
 
@@ -143,22 +158,6 @@ var helpers = {
                 helpers.downloadFiles(files, dir, callback);
             }
         }
-    },
-    mergeObjects: function (obj1, obj2) {
-        for (var p in obj2) {
-            try {
-                // Property in destination object set; update its value.
-                if (obj2[p].constructor == Object) {
-                    obj1[p] = this.mergeObjects(obj1[p], obj2[p]);
-                } else {
-                    obj1[p] = obj2[p];
-                }
-            } catch (e) {
-                // Property in destination object not set; create it and set its value.
-                obj1[p] = obj2[p];
-            }
-        }
-        return obj1;
     }
 }
 
@@ -169,11 +168,15 @@ function loadPage(url, data) {
 
     walkTemplate($, pageTemplate, downloads);
 
-    helpers.downloadFiles(downloads, function (error, filename) {
-        if (error) {
-            console.log('Error downloading file to: ' + filename);
-        }
-    });
+    if (typeof argv.d === 'undefined' || argv.d !== 'off') {
+        helpers.downloadFiles(downloads, function (error, filename) {
+            if (error) {
+                console.log('Error downloading file to: ' + filename);
+            }
+        });
+    }
+
+    cleanTemplate($, pageTemplate);
 
     var saveFilename = options.dataFilename($, url, pageTemplate);
 
@@ -192,8 +195,22 @@ function walkTemplate($, currentResource, downloads) {
     });
 }
 
+function cleanTemplate($, currentResource) {
+    //delete metadata
+    Object.keys(currentResource).forEach(function (key) {
+        if (currentResource.hasOwnProperty(key)) {
+            if (currentResource[key] !== null && typeof currentResource[key] === 'object') {
+                cleanTemplate($, currentResource[key]);
+            } else if (options.deleteMetadata().indexOf(key) !== -1) {
+                delete currentResource[key];
+            }
+        }
+    });
+}
+
+//Merge options
 if (typeof external['options'] !== 'undefined') {
-    options = helpers.mergeObjects(options, external.options);
+    options = merge(options, external.options);
 }
 
 fs.readFile(argv.u, 'utf8', function (err, data) {
@@ -205,13 +222,17 @@ fs.readFile(argv.u, 'utf8', function (err, data) {
     var urlList = data.split("\n");
 
     urlList.forEach(function (url) {
-        url = url.trim();
-        request.get({url: url, encoding: 'utf-8'}, function (err, response, body) {
-            if (err) {
-                console.log("Error on url: " + url);
-            } else {
-                loadPage(url, body);
-            }
-        });
+        try {
+            url = url.trim();
+            request.get({url: url, encoding: 'utf-8'}, function (err, response, body) {
+                if (err) {
+                    console.log("Error on url: " + url);
+                } else {
+                    loadPage(url, body);
+                }
+            });
+        } catch (err) {
+            console.log('Error processing url: ' + url);
+        }
     });
 });
